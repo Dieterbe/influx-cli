@@ -31,8 +31,30 @@ exit / ctrl-D    : exit the program
 
 ```
 
+installation
+------------
+
+```
+go get github.com/Dieterbe/influx-cli
+```
+
+running
+-------
+
+`$GOPATH/bin/influx-cli` or just `influx-cli` if you put `$GOPATH/bin` in your `$PATH`
+
+```
+$ influx-cli --help
+Usage of influx-cli:
+  -db="": database to use
+  -host="localhost": host to connect to
+  -pass="root": influxdb password
+  -port=8086: port to connect to
+  -user="root": influxdb username
+```
+
 TODO
 ----
 
 * readline persistence
-* implement many more commands
+* implement more commands
