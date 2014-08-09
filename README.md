@@ -1,5 +1,5 @@
 commandline client for influxdb, in Go
-similar to mysql, pgsql, etc. except suckier, for now.
+similar to mysql, pgsql, etc.
 
 features
 --------

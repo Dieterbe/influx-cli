@@ -9,18 +9,48 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 )
 
 var host, user, pass, db string
 var port int
 var cl *client.Client
 var handlers []HandlerSpec
+var timing bool
 
-type Handler func(cmd string)
+type Handler func(cmd string) *Timing
 
 type HandlerSpec struct {
 	Match string
 	Handler
+}
+
+type Timing struct {
+	Pre      time.Time
+	Executed time.Time
+	Printed  time.Time
+}
+
+func makeTiming() *Timing {
+	return &Timing{Pre: time.Now()}
+}
+
+func (t *Timing) StringQuery() string {
+	if t.Executed.IsZero() {
+		return "unknown"
+	}
+	return t.Executed.Sub(t.Pre).String()
+}
+
+func (t *Timing) StringPrint() string {
+	if t.Executed.IsZero() || t.Printed.IsZero() {
+		return "unknown"
+	}
+	return t.Printed.Sub(t.Executed).String()
+}
+
+func (t *Timing) String() string {
+	return "query+network: " + t.StringQuery() + "\ndisplaying   : " + t.StringPrint()
 }
 
 func init() {
@@ -31,6 +61,7 @@ func init() {
 	flag.StringVar(&db, "db", "", "database to use")
 
 	handlers = []HandlerSpec{
+		HandlerSpec{"\\", optionHandler},
 		HandlerSpec{"create db", createDbHandler},
 		HandlerSpec{"drop db", dropDbHandler},
 		HandlerSpec{"list db", listDbHandler},
@@ -48,6 +79,9 @@ func printHelp() {
 commands      : this menu
 help          : this menu
 
+\t               : toggle option timing (display timings of query execution + network and output displayig)
+                   (default: false)
+
 create db <name> : create database
 drop db <name>   : drop database
 list db          : list databases
@@ -62,8 +96,6 @@ exit / ctrl-D    : exit the program
 `
 	fmt.Println(out)
 }
-
-// TODO option for timing
 
 func main() {
 	flag.Parse()
@@ -117,52 +149,90 @@ L:
 func handle(cmd string) {
 	for _, spec := range handlers {
 		if strings.Contains(cmd, spec.Match) {
-			spec.Handler(cmd)
+			t := spec.Handler(cmd)
+			if timing {
+				// some functions return no timing, because it doesn't apply to them
+				if t != nil {
+					fmt.Println("timing>")
+					fmt.Println(t)
+				}
+			}
 			break
 		}
 	}
 }
 
-func listDbHandler(cmd string) {
+func optionHandler(cmd string) *Timing {
+	switch cmd {
+	case "\\t":
+		timing = !timing
+		fmt.Println("timing is now", timing)
+	default:
+		fmt.Fprintf(os.Stderr, "unrecognized option")
+	}
+	return nil
+}
+
+func listDbHandler(cmd string) *Timing {
+	timings := makeTiming()
 	list, err := cl.GetDatabaseList()
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
 	for _, item := range list {
 		fmt.Println(item["name"])
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func createDbHandler(cmd string) {
-	err := cl.CreateDatabase("new_db_name")
+func createDbHandler(cmd string) *Timing {
+	name := strings.Replace(cmd, "create db ", "", 1)
+	timings := makeTiming()
+	err := cl.CreateDatabase(name)
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func dropDbHandler(cmd string) {
-	err := cl.DeleteDatabase("some_db_to_drop")
+func dropDbHandler(cmd string) *Timing {
+	name := strings.Replace(cmd, "drop db ", "", 1)
+	timings := makeTiming()
+	err := cl.DeleteDatabase(name)
+	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func pingHandler(cmd string) {
+func pingHandler(cmd string) *Timing {
+	timings := makeTiming()
 	err := cl.Ping()
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func listServersHandler(cmd string) {
+func listServersHandler(cmd string) *Timing {
+	timings := makeTiming()
 	list, err := cl.Servers()
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
 	for _, server := range list {
 		fmt.Println("## id", server["id"])
@@ -172,26 +242,34 @@ func listServersHandler(cmd string) {
 			}
 		}
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func listSeriesHandler(cmd string) {
+func listSeriesHandler(cmd string) *Timing {
+	timings := makeTiming()
 	list_series, err := cl.Query(cmd)
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
 	for _, series := range list_series {
 		for _, p := range series.Points {
 			fmt.Println(p[1])
 		}
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func selectHandler(cmd string) {
+func selectHandler(cmd string) *Timing {
+	timings := makeTiming()
 	series, err := cl.Query(cmd + ";")
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
 	type Spec struct {
 		Header string
@@ -226,14 +304,20 @@ func selectHandler(cmd string) {
 			fmt.Println()
 		}
 	}
+	timings.Printed = time.Now()
+	return timings
 }
 
-func defaultHandler(cmd string) {
+func defaultHandler(cmd string) *Timing {
 	fmt.Println("executing query RAW!")
+	timings := makeTiming()
 	out, err := cl.Query(cmd + ";")
+	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
-		return
+		return timings
 	}
 	spew.Dump(out)
+	timings.Printed = time.Now()
+	return timings
 }
