@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -18,7 +19,7 @@ var cl *client.Client
 var handlers []HandlerSpec
 var timing bool
 
-type Handler func(cmd string) *Timing
+type Handler func(cmd []string) *Timing
 
 type HandlerSpec struct {
 	Match string
@@ -61,15 +62,15 @@ func init() {
 	flag.StringVar(&db, "db", "", "database to use")
 
 	handlers = []HandlerSpec{
-		HandlerSpec{"\\", optionHandler},
-		HandlerSpec{"create db", createDbHandler},
-		HandlerSpec{"drop db", dropDbHandler},
-		HandlerSpec{"list db", listDbHandler},
-		HandlerSpec{"list series", listSeriesHandler},
-		HandlerSpec{"list servers", listServersHandler},
-		HandlerSpec{"ping", pingHandler},
-		HandlerSpec{"select", selectHandler},
-		HandlerSpec{"", defaultHandler},
+		HandlerSpec{"^\\\\(.)", optionHandler},
+		HandlerSpec{"^create db ([a-zA-Z0-9_-]+)", createDbHandler},
+		HandlerSpec{"^drop db ([a-zA-Z0-9_-]+)", dropDbHandler},
+		HandlerSpec{"^list db", listDbHandler},
+		HandlerSpec{"^list series.*", listSeriesHandler},
+		HandlerSpec{"^list servers$", listServersHandler},
+		HandlerSpec{"^ping$", pingHandler},
+		HandlerSpec{"^select .*", selectHandler},
+		HandlerSpec{".*", defaultHandler},
 	}
 }
 
@@ -140,7 +141,7 @@ L:
 			printHelp()
 		case *result != "": //ignore blank lines
 			readline.AddHistory(*result)
-			cmd := strings.TrimSuffix(*result, ";")
+			cmd := strings.TrimSuffix(strings.TrimSpace(*result), ";")
 			handle(cmd)
 		}
 	}
@@ -148,8 +149,9 @@ L:
 
 func handle(cmd string) {
 	for _, spec := range handlers {
-		if strings.Contains(cmd, spec.Match) {
-			t := spec.Handler(cmd)
+		re := regexp.MustCompile(spec.Match)
+		if matches := re.FindStringSubmatch(cmd); len(matches) > 0 {
+			t := spec.Handler(matches)
 			if timing {
 				// some functions return no timing, because it doesn't apply to them
 				if t != nil {
@@ -162,9 +164,9 @@ func handle(cmd string) {
 	}
 }
 
-func optionHandler(cmd string) *Timing {
-	switch cmd {
-	case "\\t":
+func optionHandler(cmd []string) *Timing {
+	switch cmd[1] {
+	case "t":
 		timing = !timing
 		fmt.Println("timing is now", timing)
 	default:
@@ -173,7 +175,7 @@ func optionHandler(cmd string) *Timing {
 	return nil
 }
 
-func listDbHandler(cmd string) *Timing {
+func listDbHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	list, err := cl.GetDatabaseList()
 	timings.Executed = time.Now()
@@ -188,8 +190,7 @@ func listDbHandler(cmd string) *Timing {
 	return timings
 }
 
-func createDbHandler(cmd string) *Timing {
-	name := strings.Replace(cmd, "create db ", "", 1)
+func createDbHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	err := cl.CreateDatabase(name)
 	timings.Executed = time.Now()
@@ -201,10 +202,9 @@ func createDbHandler(cmd string) *Timing {
 	return timings
 }
 
-func dropDbHandler(cmd string) *Timing {
-	name := strings.Replace(cmd, "drop db ", "", 1)
+func dropDbHandler(cmd []string) *Timing {
 	timings := makeTiming()
-	err := cl.DeleteDatabase(name)
+	err := cl.DeleteDatabase(cmd[1])
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
@@ -214,7 +214,7 @@ func dropDbHandler(cmd string) *Timing {
 	return timings
 }
 
-func pingHandler(cmd string) *Timing {
+func pingHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	err := cl.Ping()
 	timings.Executed = time.Now()
@@ -226,7 +226,7 @@ func pingHandler(cmd string) *Timing {
 	return timings
 }
 
-func listServersHandler(cmd string) *Timing {
+func listServersHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	list, err := cl.Servers()
 	timings.Executed = time.Now()
@@ -246,9 +246,9 @@ func listServersHandler(cmd string) *Timing {
 	return timings
 }
 
-func listSeriesHandler(cmd string) *Timing {
+func listSeriesHandler(cmd []string) *Timing {
 	timings := makeTiming()
-	list_series, err := cl.Query(cmd)
+	list_series, err := cl.Query(cmd[0])
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
@@ -263,9 +263,9 @@ func listSeriesHandler(cmd string) *Timing {
 	return timings
 }
 
-func selectHandler(cmd string) *Timing {
+func selectHandler(cmd []string) *Timing {
 	timings := makeTiming()
-	series, err := cl.Query(cmd + ";")
+	series, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
@@ -308,10 +308,10 @@ func selectHandler(cmd string) *Timing {
 	return timings
 }
 
-func defaultHandler(cmd string) *Timing {
+func defaultHandler(cmd []string) *Timing {
 	fmt.Println("executing query RAW!")
 	timings := makeTiming()
-	out, err := cl.Query(cmd + ";")
+	out, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error())
