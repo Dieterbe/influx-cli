@@ -109,12 +109,12 @@ func main() {
 	var err error
 	cl, err = client.NewClient(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(1)
 	}
 	err = cl.Ping()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(2)
 	}
 	ui()
@@ -180,7 +180,7 @@ func listDbHandler(cmd []string) *Timing {
 	list, err := cl.GetDatabaseList()
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	for _, item := range list {
@@ -192,10 +192,10 @@ func listDbHandler(cmd []string) *Timing {
 
 func createDbHandler(cmd []string) *Timing {
 	timings := makeTiming()
-	err := cl.CreateDatabase(name)
+	err := cl.CreateDatabase(cmd[1])
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	timings.Printed = time.Now()
@@ -219,7 +219,7 @@ func pingHandler(cmd []string) *Timing {
 	err := cl.Ping()
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	timings.Printed = time.Now()
@@ -231,7 +231,7 @@ func listServersHandler(cmd []string) *Timing {
 	list, err := cl.Servers()
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	for _, server := range list {
@@ -251,7 +251,7 @@ func listSeriesHandler(cmd []string) *Timing {
 	list_series, err := cl.Query(cmd[0])
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	for _, series := range list_series {
@@ -268,7 +268,7 @@ func selectHandler(cmd []string) *Timing {
 	series, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	type Spec struct {
@@ -314,7 +314,7 @@ func defaultHandler(cmd []string) *Timing {
 	out, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error())
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
 	spew.Dump(out)
