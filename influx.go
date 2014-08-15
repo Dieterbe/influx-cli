@@ -82,13 +82,13 @@ help          : this menu
 \t               : toggle option timing (display timings of query execution + network and output displayig)
                    (default: false)
 
-create db <name> : create database
-drop db <name>   : drop database
-list db          : list databases
-list series      : list series
-list servers     : list servers
-ping             : ping the server
-select ...       : select statement for data retrieval
+create db <name>           : create database
+drop db <name>             : drop database
+list db                    : list databases
+list series [/regex/[i]]   : list series, optionally filtered by regex
+list servers               : list servers
+ping                       : ping the server
+select ...                 : select statement for data retrieval
 
 *                : execute query raw (fallback for unsupported queries)
 
