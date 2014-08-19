@@ -8,7 +8,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	usr "os/user"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -54,6 +56,25 @@ func (t *Timing) String() string {
 	return "query+network: " + t.StringQuery() + "\ndisplaying   : " + t.StringPrint()
 }
 
+var regexBind = "^bind"
+var regexCreateAdmin = "^create admin ([a-zA-Z0-9_-]+) (.+)"
+var regexCreateDb = "^create db ([a-zA-Z0-9_-]+)"
+var regexDeleteAdmin = "^delete admin ([a-zA-Z0-9_-]+)"
+var regexDeleteDb = "^delete db ([a-zA-Z0-9_-]+)"
+var regexDeleteServer = "^delete server (.+)"
+var regexEcho = "^echo (.+)"
+var regexInsert = "^insert into ([a-zA-Z0-9_-]+) ?(\\(.+\\))? values \\((.*)\\)"
+var regexInsertQuoted = "^insert into \"(.+)\" ?(\\(.+\\))? values \\((.*)\\)"
+var regexListAdmin = "^list admin"
+var regexListDb = "^list db"
+var regexListSeries = "^list series.*"
+var regexListServers = "^list servers$"
+var regexOption = "^\\\\([a-z]+) ?([a-zA-Z0-9_-]+)?"
+var regexPing = "^ping$"
+var regexRaw = "^raw (.+)"
+var regexSelect = "^select .*"
+var regexUpdateAdmin = "^update admin ([a-zA-Z0-9_-]+) (.+)"
+
 func init() {
 	flag.StringVar(&host, "host", "localhost", "host to connect to")
 	flag.IntVar(&port, "port", 8086, "port to connect to")
@@ -62,44 +83,86 @@ func init() {
 	flag.StringVar(&db, "db", "", "database to use")
 
 	handlers = []HandlerSpec{
-		HandlerSpec{"^\\\\(.)", optionHandler},
-		HandlerSpec{"^create db ([a-zA-Z0-9_-]+)", createDbHandler},
-		HandlerSpec{"^drop db ([a-zA-Z0-9_-]+)", dropDbHandler},
-		HandlerSpec{"^list db", listDbHandler},
-		HandlerSpec{"^list series.*", listSeriesHandler},
-		HandlerSpec{"^list servers$", listServersHandler},
-		HandlerSpec{"^ping$", pingHandler},
-		HandlerSpec{"^select .*", selectHandler},
-		HandlerSpec{".*", defaultHandler},
+		HandlerSpec{regexBind, bindHandler},
+		HandlerSpec{regexCreateAdmin, createAdminHandler},
+		HandlerSpec{regexCreateDb, createDbHandler},
+		HandlerSpec{regexDeleteAdmin, deleteAdminHandler},
+		HandlerSpec{regexDeleteDb, deleteDbHandler},
+		HandlerSpec{regexDeleteServer, deleteServerHandler},
+		HandlerSpec{regexEcho, echoHandler},
+		HandlerSpec{regexInsert, insertHandler},
+		HandlerSpec{regexInsertQuoted, insertHandler},
+		HandlerSpec{regexListAdmin, listAdminHandler},
+		HandlerSpec{regexListDb, listDbHandler},
+		HandlerSpec{regexListSeries, listSeriesHandler},
+		HandlerSpec{regexListServers, listServersHandler},
+		HandlerSpec{regexOption, optionHandler},
+		HandlerSpec{regexPing, pingHandler},
+		HandlerSpec{regexRaw, rawHandler},
+		HandlerSpec{regexSelect, selectHandler},
+		HandlerSpec{regexUpdateAdmin, updateAdminPassHandler},
 	}
 }
 
 func printHelp() {
 	out := `Help:
 
-commands      : this menu
-help          : this menu
+options & current session
+-------------------------
 
-\t               : toggle option timing (display timings of query execution + network and output displayig)
+\t               : toggle timing, which displays timing of
+                   query execution + network and output displaying
                    (default: false)
+\comp            : disable compression (client lib doesn't support enabling)
+\db <db>         : switch to databasename (requires a bind call to be effective)
+\user <username> : switch to different user (requires a bind call to be effective)
+\pass <password> : update password (requires a bind call to be effective)
 
-create db <name>           : create database
-drop db <name>             : drop database
-list db                    : list databases
-list series [/regex/[i]]   : list series, optionally filtered by regex
-list servers               : list servers
-ping                       : ping the server
+bind             : bind again, possibly after updating db, user or pass
+ping             : ping the server
+
+
+admin
+-----
+
+create admin <user> <pass>      : add given admin user
+delete admin <user>             : delete admin user
+update admin <user> <pass>      : update the password for given admin user
+list admin                      : list admins
+
+create db <name>                : create database
+delete db <name>                : drop database
+list db                         : list databases
+
+list series [/regex/[i]]        : list series, optionally filtered by regex
+
+delete server <id>              : delete server by id
+list servers                    : list servers
+
+
+data i/o
+--------
+
+insert into <name> [(col1[,col2[...]])] values (val1[,val2[,val3[...]]])
+                           : insert values into the given columns for given series name.
+                             columns is optional and defaults to (time, sequence_number, value)
 select ...                 : select statement for data retrieval
 
-*                : execute query raw (fallback for unsupported queries)
 
+misc
+----
+
+raw <str>        : execute query raw (fallback for unsupported queries)
+echo <str>       : echo string + newline.
+                   this is useful when the input is not visible, i.e. from scripts
+commands         : this menu
+help             : this menu
 exit / ctrl-D    : exit the program
 `
 	fmt.Println(out)
 }
 
-func main() {
-	flag.Parse()
+func getClient() error {
 	cfg := &client.ClientConfig{
 		Host:     fmt.Sprintf("%s:%d", host, port),
 		Username: user,
@@ -109,15 +172,47 @@ func main() {
 	var err error
 	cl, err = client.NewClient(cfg)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, err.Error()+"\n")
-		os.Exit(1)
+		return err
 	}
 	err = cl.Ping()
+	if err != nil {
+		return err
+	}
+	//fmt.Printf("connected to %s:%s@%s:%d/%s\n", user, pass, host, port, db)
+	return nil
+}
+
+func main() {
+	flag.Parse()
+
+	history_path := "~/.influx_history"
+	cur_usr, err := usr.Current()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(2)
 	}
+	if history_path[:1] == "~" {
+		history_path = strings.Replace(history_path, "~", cur_usr.HomeDir, 1)
+	}
+	err = readline.ReadHistoryFile(history_path)
+	if err != nil {
+		if err.Error() != "no such file or directory" {
+			fmt.Fprintf(os.Stderr, "Cannot read '%s': %s\n", history_path, err.Error())
+			os.Exit(1)
+		}
+	}
+
+	err = getClient()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		os.Exit(1)
+	}
 	ui()
+	err = readline.WriteHistoryFile(history_path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", history_path, err.Error())
+		os.Exit(1)
+	}
 }
 
 func ui() {
@@ -148,6 +243,7 @@ L:
 }
 
 func handle(cmd string) {
+	handled := false
 	for _, spec := range handlers {
 		re := regexp.MustCompile(spec.Match)
 		if matches := re.FindStringSubmatch(cmd); len(matches) > 0 {
@@ -159,8 +255,11 @@ func handle(cmd string) {
 					fmt.Println(t)
 				}
 			}
-			break
+			handled = true
 		}
+	}
+	if !handled {
+		fmt.Fprintf(os.Stderr, "Could not handle the command. type 'help' to get a help menu")
 	}
 }
 
@@ -169,10 +268,77 @@ func optionHandler(cmd []string) *Timing {
 	case "t":
 		timing = !timing
 		fmt.Println("timing is now", timing)
+	case "comp":
+		cl.DisableCompression()
+		fmt.Println("compression is now disabled")
+	case "db":
+		if cmd[2] == "" {
+			fmt.Fprintf(os.Stderr, "database argument must be set")
+			break
+		}
+		db = cmd[2]
+	case "user":
+		if cmd[2] == "" {
+			fmt.Fprintf(os.Stderr, "user argument must be set")
+			break
+		}
+		user = cmd[2]
+	case "pass":
+		if cmd[2] == "" {
+			fmt.Fprintf(os.Stderr, "password argument must be set")
+			break
+		}
+		pass = cmd[2]
 	default:
 		fmt.Fprintf(os.Stderr, "unrecognized option")
 	}
 	return nil
+}
+
+func createAdminHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	name := strings.TrimSpace(cmd[1])
+	pass := strings.TrimSpace(cmd[2])
+	err := cl.CreateClusterAdmin(name, pass)
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func updateAdminPassHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	name := strings.TrimSpace(cmd[1])
+	pass := strings.TrimSpace(cmd[2])
+	err := cl.UpdateClusterAdmin(name, pass)
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func listAdminHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	l, err := cl.GetClusterAdminList()
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	for k, val := range l {
+		fmt.Println("##", k)
+		for k, v := range val {
+            fmt.Printf("%25s %v\n", k, v)
+		}
+	}
+	timings.Printed = time.Now()
+	return timings
 }
 
 func listDbHandler(cmd []string) *Timing {
@@ -202,9 +368,110 @@ func createDbHandler(cmd []string) *Timing {
 	return timings
 }
 
-func dropDbHandler(cmd []string) *Timing {
+func deleteDbHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	err := cl.DeleteDatabase(cmd[1])
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func deleteAdminHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	err := cl.DeleteClusterAdmin(strings.TrimSpace(cmd[1]))
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func deleteServerHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	id, err := strconv.ParseInt(cmd[1], 10, 32)
+	err = cl.RemoveServer(int(id))
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func echoHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	timings.Executed = time.Now()
+	fmt.Println(cmd[1])
+	timings.Printed = time.Now()
+	return timings
+}
+
+// influxdb is typed, so try to parse as int, as float, and fall back to str
+func parseTyped(value_str string) interface{} {
+	valueInt, err := strconv.ParseInt(strings.TrimSpace(value_str), 10, 64)
+	if err == nil {
+		return valueInt
+	}
+	valueFloat, err := strconv.ParseFloat(value_str, 64)
+	if err == nil {
+		return valueFloat
+	}
+	return value_str
+}
+
+func bindHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	// for some reason this call returns error (401): Invalid username/password
+	//err := cl.AuthenticateDatabaseUser(db, user, pass)
+	// so for now, the slightly less efficient way:
+	err := getClient()
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func insertHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	series_name := cmd[1]
+	cols_str := strings.TrimPrefix(cmd[2], " ")
+	var cols []string
+	if cols_str != "" {
+		cols_str = cols_str[1 : len(cols_str)-1] // strip surrounding ()
+		cols = strings.Split(cols_str, ",")
+	} else {
+		cols = []string{"time", "sequence_number", "value"}
+	}
+	vals_str := cmd[3]
+	values := strings.Split(vals_str, ",")
+	if len(values) != len(cols) {
+		fmt.Fprintf(os.Stderr, "Number of values (%d) must match number of colums (%d): Columns are: %v\n", len(values), len(cols), cols)
+		return timings
+	}
+	point := make([]interface{}, len(cols), len(cols))
+
+	for i, value_str := range values {
+		point[i] = parseTyped(value_str)
+	}
+
+	serie := &client.Series{
+		Name:    series_name,
+		Columns: cols,
+		Points:  [][]interface{}{point},
+	}
+
+	err := cl.WriteSeries([]*client.Series{serie})
+
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
@@ -308,10 +575,9 @@ func selectHandler(cmd []string) *Timing {
 	return timings
 }
 
-func defaultHandler(cmd []string) *Timing {
-	fmt.Println("executing query RAW!")
+func rawHandler(cmd []string) *Timing {
 	timings := makeTiming()
-	out, err := cl.Query(cmd[0] + ";")
+	out, err := cl.Query(cmd[1] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
