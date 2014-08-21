@@ -233,11 +233,9 @@ L:
 	for {
 		switch result := readline.ReadLine(&prompt); true {
 		case result == nil:
-			println()
 			break L
 		case *result == "exit":
 			readline.AddHistory(*result)
-			println()
 			break L
 		case *result == "commands":
 			readline.AddHistory(*result)
@@ -270,7 +268,7 @@ func handle(cmd string) {
 		}
 	}
 	if !handled {
-		fmt.Fprintf(os.Stderr, "Could not handle the command. type 'help' to get a help menu")
+		fmt.Fprintln(os.Stderr, "Could not handle the command. type 'help' to get a help menu")
 	}
 }
 
