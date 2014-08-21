@@ -345,7 +345,7 @@ func listAdminHandler(cmd []string) *Timing {
 	for k, val := range l {
 		fmt.Println("##", k)
 		for k, v := range val {
-            fmt.Printf("%25s %v\n", k, v)
+			fmt.Printf("%25s %v\n", k, v)
 		}
 	}
 	timings.Printed = time.Now()
