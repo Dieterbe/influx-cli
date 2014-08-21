@@ -63,6 +63,7 @@ var regexCreateDb = "^create db ([a-zA-Z0-9_-]+)"
 var regexDeleteAdmin = "^delete admin ([a-zA-Z0-9_-]+)"
 var regexDeleteDb = "^delete db ([a-zA-Z0-9_-]+)"
 var regexDeleteServer = "^delete server (.+)"
+var regexDropSeries = "^drop series .+"
 var regexEcho = "^echo (.+)"
 var regexInsert = "^insert into ([a-zA-Z0-9_-]+) ?(\\(.+\\))? values \\((.*)\\)"
 var regexInsertQuoted = "^insert into \"(.+)\" ?(\\(.+\\))? values \\((.*)\\)"
@@ -90,6 +91,7 @@ func init() {
 		HandlerSpec{regexDeleteAdmin, deleteAdminHandler},
 		HandlerSpec{regexDeleteDb, deleteDbHandler},
 		HandlerSpec{regexDeleteServer, deleteServerHandler},
+		HandlerSpec{regexDropSeries, dropSeriesHandler},
 		HandlerSpec{regexEcho, echoHandler},
 		HandlerSpec{regexInsert, insertHandler},
 		HandlerSpec{regexInsertQuoted, insertHandler},
@@ -136,6 +138,7 @@ delete db <name>                : drop database
 list db                         : list databases
 
 list series [/regex/[i]]        : list series, optionally filtered by regex
+drop series <name>              : drop series by given name
 
 delete server <id>              : delete server by id
 list servers                    : list servers
@@ -404,6 +407,18 @@ func deleteServerHandler(cmd []string) *Timing {
 	timings := makeTiming()
 	id, err := strconv.ParseInt(cmd[1], 10, 32)
 	err = cl.RemoveServer(int(id))
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func dropSeriesHandler(cmd []string) *Timing {
+	timings := makeTiming()
+	_, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
