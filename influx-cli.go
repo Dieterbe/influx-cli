@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/andrew-d/go-termutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/influxdb/influxdb/client"
 	"github.com/shavac/readline"
@@ -207,7 +208,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(1)
 	}
-	ui()
+	interactive := true
+	if !termutil.Isatty(os.Stdin.Fd()) {
+		interactive = false
+	}
+	ui(interactive)
 	err = readline.WriteHistoryFile(history_path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", history_path, err.Error())
@@ -215,8 +220,11 @@ func main() {
 	}
 }
 
-func ui() {
-	prompt := "influx> "
+func ui(interactive bool) {
+	prompt := ""
+	if interactive {
+		prompt = "influx> "
+	}
 
 L:
 	for {
