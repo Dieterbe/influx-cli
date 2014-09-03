@@ -22,12 +22,16 @@ running
 `$GOPATH/bin/influx-cli` or just `influx-cli` if you put `$GOPATH/bin` in your `$PATH`
 
 ```
-Usage of ./influx:
+Usage: influx-cli [flags] [query to execute on start]
+
+Flags:
   -db="": database to use
   -host="localhost": host to connect to
   -pass="root": influxdb password
   -port=8086: port to connect to
   -user="root": influxdb username
+
+Note: you can also pipe queries into stdin, one line per query
 ```
 
 usage

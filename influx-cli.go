@@ -84,6 +84,13 @@ func init() {
 	flag.StringVar(&pass, "pass", "root", "influxdb password")
 	flag.StringVar(&db, "db", "", "database to use")
 
+	flag.Usage = func() {
+		fmt.Fprintln(os.Stderr, "Usage: influx-cli [flags] [query to execute on start]")
+		fmt.Fprintf(os.Stderr, "\nFlags:\n")
+		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "\nNote: you can also pipe queries into stdin, one line per query\n")
+	}
+
 	handlers = []HandlerSpec{
 		HandlerSpec{regexBind, bindHandler},
 		HandlerSpec{regexCreateAdmin, createAdminHandler},
@@ -188,6 +195,7 @@ func getClient() error {
 
 func main() {
 	flag.Parse()
+	query := strings.Join(flag.Args(), " ")
 
 	history_path := "~/.influx_history"
 	cur_usr, err := usr.Current()
@@ -215,7 +223,7 @@ func main() {
 	if !termutil.Isatty(os.Stdin.Fd()) {
 		interactive = false
 	}
-	ui(interactive)
+	ui(interactive, query)
 	err = readline.WriteHistoryFile(history_path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", history_path, err.Error())
@@ -223,10 +231,16 @@ func main() {
 	}
 }
 
-func ui(interactive bool) {
+func ui(interactive bool, query string) {
 	prompt := ""
 	if interactive {
 		prompt = "influx> "
+	}
+	if query != "" {
+		// execute query first
+		// don't add to history cause it's not really an interactive query
+		cmd := strings.TrimSuffix(strings.TrimSpace(query), ";")
+		handle(cmd)
 	}
 
 L:
