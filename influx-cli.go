@@ -8,7 +8,9 @@ import (
 
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	usr "os/user"
 	"regexp"
 	"strconv"
@@ -22,7 +24,7 @@ var cl *client.Client
 var handlers []HandlerSpec
 var timing bool
 
-type Handler func(cmd []string) *Timing
+type Handler func(cmd []string, out io.Writer) *Timing
 
 type HandlerSpec struct {
 	Match string
@@ -169,6 +171,15 @@ echo <str>       : echo string + newline.
 commands         : this menu
 help             : this menu
 exit / ctrl-D    : exit the program
+
+modifiers
+---------
+
+ANY command above can be subject to:
+
+| <command>     : pipe the output into an external command (example: list series | sort)
+                  note: only one external command is currently supported
+> <filename>    : TODO redirect stdout to a file
 `
 	fmt.Println(out)
 }
@@ -267,10 +278,45 @@ L:
 
 func handle(cmd string) {
 	handled := false
+	cmdArr := strings.Split(cmd, "|")
+	cmd = cmdArr[0]
+	var pipeTo *exec.Cmd
+	var writeTo io.WriteCloser
+	if len(cmdArr) > 1 {
+		cmdAndArgs := strings.Fields(cmdArr[1])
+		pipeTo = exec.Command(cmdAndArgs[0], cmdAndArgs[1:]...)
+		var err error
+		writeTo, err = pipeTo.StdinPipe()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "internal error: cannot open pipe", err.Error())
+			os.Exit(2)
+		}
+		pipeTo.Stdout = os.Stdout
+		pipeTo.Stderr = os.Stderr
+	} else {
+		writeTo = os.Stdout
+	}
+
 	for _, spec := range handlers {
 		re := regexp.MustCompile(spec.Match)
 		if matches := re.FindStringSubmatch(cmd); len(matches) > 0 {
-			t := spec.Handler(matches)
+			if pipeTo != nil {
+				err := pipeTo.Start()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "subcommand failed: ", err.Error())
+					fmt.Fprintln(os.Stderr, "aborting query")
+					break
+				}
+			}
+			t := spec.Handler(matches, writeTo)
+			if pipeTo != nil {
+				writeTo.Close()
+				err := pipeTo.Wait()
+				if err != nil {
+					fmt.Fprintln(os.Stderr, "subcommand failed: ", err.Error())
+				}
+			}
+
 			if timing {
 				// some functions return no timing, because it doesn't apply to them
 				if t != nil {
@@ -286,14 +332,14 @@ func handle(cmd string) {
 	}
 }
 
-func optionHandler(cmd []string) *Timing {
+func optionHandler(cmd []string, out io.Writer) *Timing {
 	switch cmd[1] {
 	case "t":
 		timing = !timing
-		fmt.Println("timing is now", timing)
+		fmt.Fprintln(out, "timing is now", timing)
 	case "comp":
 		cl.DisableCompression()
-		fmt.Println("compression is now disabled")
+		fmt.Fprintln(out, "compression is now disabled")
 	case "db":
 		if cmd[2] == "" {
 			fmt.Fprintf(os.Stderr, "database argument must be set")
@@ -318,7 +364,7 @@ func optionHandler(cmd []string) *Timing {
 	return nil
 }
 
-func createAdminHandler(cmd []string) *Timing {
+func createAdminHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	name := strings.TrimSpace(cmd[1])
 	pass := strings.TrimSpace(cmd[2])
@@ -332,7 +378,7 @@ func createAdminHandler(cmd []string) *Timing {
 	return timings
 }
 
-func updateAdminPassHandler(cmd []string) *Timing {
+func updateAdminPassHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	name := strings.TrimSpace(cmd[1])
 	pass := strings.TrimSpace(cmd[2])
@@ -346,7 +392,7 @@ func updateAdminPassHandler(cmd []string) *Timing {
 	return timings
 }
 
-func listAdminHandler(cmd []string) *Timing {
+func listAdminHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	l, err := cl.GetClusterAdminList()
 	timings.Executed = time.Now()
@@ -355,16 +401,16 @@ func listAdminHandler(cmd []string) *Timing {
 		return timings
 	}
 	for k, val := range l {
-		fmt.Println("##", k)
+		fmt.Fprintln(out, "##", k)
 		for k, v := range val {
-			fmt.Printf("%25s %v\n", k, v)
+			fmt.Fprintf(out, "%25s %v\n", k, v)
 		}
 	}
 	timings.Printed = time.Now()
 	return timings
 }
 
-func listDbHandler(cmd []string) *Timing {
+func listDbHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	list, err := cl.GetDatabaseList()
 	timings.Executed = time.Now()
@@ -373,13 +419,13 @@ func listDbHandler(cmd []string) *Timing {
 		return timings
 	}
 	for _, item := range list {
-		fmt.Println(item["name"])
+		fmt.Fprintln(out, item["name"])
 	}
 	timings.Printed = time.Now()
 	return timings
 }
 
-func createDbHandler(cmd []string) *Timing {
+func createDbHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	err := cl.CreateDatabase(cmd[1])
 	timings.Executed = time.Now()
@@ -391,7 +437,7 @@ func createDbHandler(cmd []string) *Timing {
 	return timings
 }
 
-func deleteDbHandler(cmd []string) *Timing {
+func deleteDbHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	err := cl.DeleteDatabase(cmd[1])
 	timings.Executed = time.Now()
@@ -403,7 +449,7 @@ func deleteDbHandler(cmd []string) *Timing {
 	return timings
 }
 
-func deleteAdminHandler(cmd []string) *Timing {
+func deleteAdminHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	err := cl.DeleteClusterAdmin(strings.TrimSpace(cmd[1]))
 	timings.Executed = time.Now()
@@ -415,7 +461,7 @@ func deleteAdminHandler(cmd []string) *Timing {
 	return timings
 }
 
-func deleteServerHandler(cmd []string) *Timing {
+func deleteServerHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	id, err := strconv.ParseInt(cmd[1], 10, 32)
 	err = cl.RemoveServer(int(id))
@@ -428,7 +474,7 @@ func deleteServerHandler(cmd []string) *Timing {
 	return timings
 }
 
-func dropSeriesHandler(cmd []string) *Timing {
+func dropSeriesHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	_, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
@@ -440,10 +486,10 @@ func dropSeriesHandler(cmd []string) *Timing {
 	return timings
 }
 
-func echoHandler(cmd []string) *Timing {
+func echoHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	timings.Executed = time.Now()
-	fmt.Println(cmd[1])
+	fmt.Fprintln(out, cmd[1])
 	timings.Printed = time.Now()
 	return timings
 }
@@ -461,7 +507,7 @@ func parseTyped(value_str string) interface{} {
 	return value_str
 }
 
-func bindHandler(cmd []string) *Timing {
+func bindHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	// for some reason this call returns error (401): Invalid username/password
 	//err := cl.AuthenticateDatabaseUser(db, user, pass)
@@ -476,7 +522,7 @@ func bindHandler(cmd []string) *Timing {
 	return timings
 }
 
-func insertHandler(cmd []string) *Timing {
+func insertHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	series_name := cmd[1]
 	cols_str := strings.TrimPrefix(cmd[2], " ")
@@ -516,7 +562,7 @@ func insertHandler(cmd []string) *Timing {
 	return timings
 }
 
-func pingHandler(cmd []string) *Timing {
+func pingHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	err := cl.Ping()
 	timings.Executed = time.Now()
@@ -528,7 +574,7 @@ func pingHandler(cmd []string) *Timing {
 	return timings
 }
 
-func listServersHandler(cmd []string) *Timing {
+func listServersHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	list, err := cl.Servers()
 	timings.Executed = time.Now()
@@ -537,10 +583,10 @@ func listServersHandler(cmd []string) *Timing {
 		return timings
 	}
 	for _, server := range list {
-		fmt.Println("## id", server["id"])
+		fmt.Fprintln(out, "## id", server["id"])
 		for k, v := range server {
 			if k != "id" {
-				fmt.Printf("%25s %v\n", k, v)
+				fmt.Fprintf(out, "%25s %v\n", k, v)
 			}
 		}
 	}
@@ -548,7 +594,7 @@ func listServersHandler(cmd []string) *Timing {
 	return timings
 }
 
-func listSeriesHandler(cmd []string) *Timing {
+func listSeriesHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	list_series, err := cl.Query(cmd[0])
 	timings.Executed = time.Now()
@@ -558,14 +604,14 @@ func listSeriesHandler(cmd []string) *Timing {
 	}
 	for _, series := range list_series {
 		for _, p := range series.Points {
-			fmt.Println(p[1])
+			fmt.Fprintln(out, p[1])
 		}
 	}
 	timings.Printed = time.Now()
 	return timings
 }
 
-func selectHandler(cmd []string) *Timing {
+func selectHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
 	series, err := cl.Query(cmd[0] + ";")
 	timings.Executed = time.Now()
@@ -587,7 +633,7 @@ func selectHandler(cmd []string) *Timing {
 	var ok bool
 
 	for _, serie := range series {
-		fmt.Println("##", serie.Name)
+		fmt.Fprintln(out, "##", serie.Name)
 
 		colrows := make([]string, len(serie.Columns), len(serie.Columns))
 
@@ -595,30 +641,30 @@ func selectHandler(cmd []string) *Timing {
 			if spec, ok = specs[col]; !ok {
 				spec = defaultSpec
 			}
-			fmt.Printf(spec.Header, col)
+			fmt.Fprintf(out, spec.Header, col)
 			colrows[i] = spec.Row
 		}
-		fmt.Println()
+		fmt.Fprintln(out)
 		for _, p := range serie.Points {
 			for i, fmtStr := range colrows {
-				fmt.Printf(fmtStr, p[i])
+				fmt.Fprintf(out, fmtStr, p[i])
 			}
-			fmt.Println()
+			fmt.Fprintln(out)
 		}
 	}
 	timings.Printed = time.Now()
 	return timings
 }
 
-func rawHandler(cmd []string) *Timing {
+func rawHandler(cmd []string, out io.Writer) *Timing {
 	timings := makeTiming()
-	out, err := cl.Query(cmd[1] + ";")
+	result, err := cl.Query(cmd[1] + ";")
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		return timings
 	}
-	spew.Dump(out)
+	spew.Dump(result)
 	timings.Printed = time.Now()
 	return timings
 }

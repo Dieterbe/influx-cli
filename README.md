@@ -92,4 +92,13 @@ commands         : this menu
 help             : this menu
 exit / ctrl-D    : exit the program
 
+modifiers
+---------
+
+ANY command above can be subject to:
+
+| <command>     : pipe the output into an external command (example: list series | sort)
+                  note: only one external command is currently supported
+> <filename>    : TODO redirect stdout to a file
+
 ```
