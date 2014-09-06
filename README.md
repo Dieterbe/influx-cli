@@ -98,7 +98,7 @@ modifiers
 ANY command above can be subject to:
 
 | <command>     : pipe the output into an external command (example: list series | sort)
-                  note: only one external command is currently supported
+                  note: currently you can only pipe into one external command at a time
 > <filename>    : TODO redirect stdout to a file
 
 ```
