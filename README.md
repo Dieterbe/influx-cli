@@ -16,6 +16,28 @@ installation
 go get github.com/Dieterbe/influx-cli
 ```
 
+configuration
+-------------
+
+The commandline options (see below) can also be stored in `~/.influxrc`
+For example:
+
+```
+host = "localhost"
+port = 8086
+user = "root"
+pass = "root"
+db = ""
+```
+
+The values in use at runtime follow this order of preference:  
+
+  defaults -> influxrc -> commandline args -> interactive updates
+
+Pro-tip: you can use the `writerc` command at runtime to generate this file,
+it will export the current runtime values.
+
+
 running
 -------
 
@@ -88,6 +110,7 @@ misc
 raw <str>        : execute query raw (fallback for unsupported queries)
 echo <str>       : echo string + newline.
                    this is useful when the input is not visible, i.e. from scripts
+writerc          : write current parameters to ~/.influxrc file
 commands         : this menu
 help             : this menu
 exit / ctrl-D    : exit the program

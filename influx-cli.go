@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/BurntSushi/toml"
 	"github.com/andrew-d/go-termutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/influxdb/influxdb/client"
@@ -23,6 +24,8 @@ var port int
 var cl *client.Client
 var handlers []HandlerSpec
 var timing bool
+
+var path_rc, path_hist string
 
 type Handler func(cmd []string, out io.Writer) *Timing
 
@@ -78,8 +81,20 @@ var regexPing = "^ping$"
 var regexRaw = "^raw (.+)"
 var regexSelect = "^select .*"
 var regexUpdateAdmin = "^update admin ([a-zA-Z0-9_-]+) (.+)"
+var regexWriteRc = "^writerc"
+
+type Config struct {
+	Host string
+	Port int
+	User string
+	Pass string
+	Db   string
+}
 
 func init() {
+	path_rc = Expand("~/.influxrc")
+	path_hist = Expand("~/.influx_history")
+
 	flag.StringVar(&host, "host", "localhost", "host to connect to")
 	flag.IntVar(&port, "port", 8086, "port to connect to")
 	flag.StringVar(&user, "user", "root", "influxdb username")
@@ -113,6 +128,7 @@ func init() {
 		HandlerSpec{regexRaw, rawHandler},
 		HandlerSpec{regexSelect, selectHandler},
 		HandlerSpec{regexUpdateAdmin, updateAdminPassHandler},
+		HandlerSpec{regexWriteRc, writeRcHandler},
 	}
 }
 
@@ -168,6 +184,7 @@ misc
 raw <str>        : execute query raw (fallback for unsupported queries)
 echo <str>       : echo string + newline.
                    this is useful when the input is not visible, i.e. from scripts
+writerc          : write current parameters to ~/.influxrc file
 commands         : this menu
 help             : this menu
 exit / ctrl-D    : exit the program
@@ -204,23 +221,55 @@ func getClient() error {
 	return nil
 }
 
-func main() {
-	flag.Parse()
-	query := strings.Join(flag.Args(), " ")
+func Expand(in string) (out string) {
+	if in[:1] == "~" {
+		cur_usr, err := usr.Current()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, err.Error()+"\n")
+			os.Exit(2)
+		}
+		out := strings.Replace(in, "~", cur_usr.HomeDir, 1)
+		return out
+	}
+	return in
+}
 
-	history_path := "~/.influx_history"
-	cur_usr, err := usr.Current()
-	if err != nil {
+func main() {
+	var conf Config
+	if _, err := os.Stat(path_rc); err == nil {
+		if _, err := toml.DecodeFile(path_rc, &conf); err != nil {
+			fmt.Fprintf(os.Stderr, err.Error()+"\n")
+			os.Exit(2)
+		}
+	} else if !os.IsNotExist(err) {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(2)
 	}
-	if history_path[:1] == "~" {
-		history_path = strings.Replace(history_path, "~", cur_usr.HomeDir, 1)
+	// else, rc doesn't exist, which is fine.
+
+	if conf.Host != "" {
+		host = conf.Host
 	}
-	err = readline.ReadHistoryFile(history_path)
+	if conf.Port != 0 {
+		port = conf.Port
+	}
+	if conf.User != "" {
+		user = conf.User
+	}
+	if conf.Pass != "" {
+		pass = conf.Pass
+	}
+	if conf.Db != "" {
+		db = conf.Db
+	}
+
+	flag.Parse()
+	query := strings.Join(flag.Args(), " ")
+
+	err := readline.ReadHistoryFile(path_hist)
 	if err != nil {
 		if err.Error() != "no such file or directory" {
-			fmt.Fprintf(os.Stderr, "Cannot read '%s': %s\n", history_path, err.Error())
+			fmt.Fprintf(os.Stderr, "Cannot read '%s': %s\n", path_hist, err.Error())
 			os.Exit(1)
 		}
 	}
@@ -235,9 +284,9 @@ func main() {
 		interactive = false
 	}
 	ui(interactive, query)
-	err = readline.WriteHistoryFile(history_path)
+	err = readline.WriteHistoryFile(path_hist)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", history_path, err.Error())
+		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", path_hist, err.Error())
 		os.Exit(1)
 	}
 }
@@ -666,5 +715,28 @@ func rawHandler(cmd []string, out io.Writer) *Timing {
 	}
 	spew.Dump(result)
 	timings.Printed = time.Now()
+	return timings
+}
+
+func writeRcHandler(cmd []string, out io.Writer) *Timing {
+	timings := makeTiming()
+	tpl := `host = "%s"
+port = %d
+user = "%s"
+pass = "%s"
+db = "%s"
+`
+	rc, err := os.Create(path_rc)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	_, err = fmt.Fprintf(rc, tpl, host, port, user, pass, db)
+
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
 	return timings
 }
