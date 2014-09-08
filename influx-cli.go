@@ -196,7 +196,8 @@ ANY command above can be subject to:
 
 | <command>     : pipe the output into an external command (example: list series | sort)
                   note: only one external command is currently supported
-> <filename>    : TODO redirect stdout to a file
+> <filename>    : redirect the output into a file
+
 `
 	fmt.Println(out)
 }
@@ -327,11 +328,14 @@ L:
 
 func handle(cmd string) {
 	handled := false
-	cmdArr := strings.Split(cmd, "|")
-	cmd = cmdArr[0]
-	var pipeTo *exec.Cmd
 	var writeTo io.WriteCloser
-	if len(cmdArr) > 1 {
+	var pipeTo *exec.Cmd
+	writeTo = os.Stdout
+	mode := 0 // 1 -> pipe to cmd, 2 -> write to file
+	if strings.Contains(cmd, "|") {
+		mode = 1
+		cmdArr := strings.Split(cmd, "|")
+		cmd = cmdArr[0]
 		cmdAndArgs := strings.Fields(cmdArr[1])
 		pipeTo = exec.Command(cmdAndArgs[0], cmdAndArgs[1:]...)
 		var err error
@@ -342,14 +346,24 @@ func handle(cmd string) {
 		}
 		pipeTo.Stdout = os.Stdout
 		pipeTo.Stderr = os.Stderr
-	} else {
-		writeTo = os.Stdout
+	} else if strings.Contains(cmd, ">") {
+		mode = 2
+		cmdArr := strings.Split(cmd, ">")
+		cmd = cmdArr[0]
+		file := strings.TrimSpace(cmdArr[1])
+		fd, err := os.Create(file)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
+			os.Exit(2)
+		}
+		defer func() { fd.Close() }()
+		writeTo = fd
 	}
 
 	for _, spec := range handlers {
 		re := regexp.MustCompile(spec.Match)
 		if matches := re.FindStringSubmatch(cmd); len(matches) > 0 {
-			if pipeTo != nil {
+			if mode == 1 {
 				err := pipeTo.Start()
 				if err != nil {
 					fmt.Fprintln(os.Stderr, "subcommand failed: ", err.Error())
@@ -358,7 +372,7 @@ func handle(cmd string) {
 				}
 			}
 			t := spec.Handler(matches, writeTo)
-			if pipeTo != nil {
+			if mode == 1 {
 				writeTo.Close()
 				err := pipeTo.Wait()
 				if err != nil {

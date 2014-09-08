@@ -122,6 +122,6 @@ ANY command above can be subject to:
 
 | <command>     : pipe the output into an external command (example: list series | sort)
                   note: only one external command is currently supported
-> <filename>    : TODO redirect stdout to a file
+> <filename>    : redirect the output into a file
 
 ```
