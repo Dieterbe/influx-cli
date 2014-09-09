@@ -346,18 +346,22 @@ func handle(cmd string) {
 		}
 		pipeTo.Stdout = os.Stdout
 		pipeTo.Stderr = os.Stderr
-	} else if strings.Contains(cmd, ">") {
-		mode = 2
-		cmdArr := strings.Split(cmd, ">")
-		cmd = cmdArr[0]
-		file := strings.TrimSpace(cmdArr[1])
-		fd, err := os.Create(file)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
-			os.Exit(2)
+	} else {
+		cmd = strings.Replace(cmd, "where time >", "INFLUX_CLI_WHERE_TIME", -1)
+		if strings.Contains(cmd, ">") {
+			mode = 2
+			cmdArr := strings.Split(cmd, ">")
+			cmd = cmdArr[0]
+			file := strings.TrimSpace(cmdArr[1])
+			fd, err := os.Create(file)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
+				os.Exit(2)
+			}
+			defer func() { fd.Close() }()
+			writeTo = fd
 		}
-		defer func() { fd.Close() }()
-		writeTo = fd
+		cmd = strings.Replace(cmd, "INFLUX_CLI_WHERE_TIME", "where time >", -1)
 	}
 
 	for _, spec := range handlers {
