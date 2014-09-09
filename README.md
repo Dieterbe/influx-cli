@@ -65,6 +65,7 @@ usage
 options & current session
 -------------------------
 
+\r               : show records only, no headers
 \t               : toggle timing, which displays timing of
                    query execution + network and output displaying
                    (default: false)

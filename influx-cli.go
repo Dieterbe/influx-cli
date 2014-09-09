@@ -24,6 +24,7 @@ var port int
 var cl *client.Client
 var handlers []HandlerSpec
 var timing bool
+var recordsOnly bool
 
 var path_rc, path_hist string
 
@@ -138,6 +139,7 @@ func printHelp() {
 options & current session
 -------------------------
 
+\r               : show records only, no headers
 \t               : toggle timing, which displays timing of
                    query execution + network and output displaying
                    (default: false)
@@ -401,6 +403,9 @@ func handle(cmd string) {
 
 func optionHandler(cmd []string, out io.Writer) *Timing {
 	switch cmd[1] {
+	case "r":
+		recordsOnly = !recordsOnly
+		fmt.Fprintln(out, "records-only is now", recordsOnly)
 	case "t":
 		timing = !timing
 		fmt.Fprintln(out, "timing is now", timing)
@@ -700,7 +705,9 @@ func selectHandler(cmd []string, out io.Writer) *Timing {
 	var ok bool
 
 	for _, serie := range series {
-		fmt.Fprintln(out, "##", serie.Name)
+		if !recordsOnly {
+			fmt.Fprintln(out, "##", serie.Name)
+		}
 
 		colrows := make([]string, len(serie.Columns), len(serie.Columns))
 
@@ -708,10 +715,14 @@ func selectHandler(cmd []string, out io.Writer) *Timing {
 			if spec, ok = specs[col]; !ok {
 				spec = defaultSpec
 			}
-			fmt.Fprintf(out, spec.Header, col)
+			if !recordsOnly {
+				fmt.Fprintf(out, spec.Header, col)
+			}
 			colrows[i] = spec.Row
 		}
-		fmt.Fprintln(out)
+		if !recordsOnly {
+			fmt.Fprintln(out)
+		}
 		for _, p := range serie.Points {
 			for i, fmtStr := range colrows {
 				fmt.Fprintf(out, fmtStr, p[i])
