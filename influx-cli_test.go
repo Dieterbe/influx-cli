@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/davecgh/go-spew/spew"
 	"reflect"
 	"regexp"
 	"testing"
@@ -9,7 +10,10 @@ import (
 func regexTest(regex *regexp.Regexp, test string, expected []string, t *testing.T) {
 	result := regex.FindStringSubmatch(test)
 	if !reflect.DeepEqual(result, expected) {
-		t.Errorf("regex   : %s\nexpected: %v\ngot     : %v\n", regex, expected, result)
+		t.Errorf("regex   : %s\n", regex)
+		t.Errorf("subject : %s\n", test)
+		t.Errorf("expected: %v\n", spew.Sdump(expected))
+		t.Errorf("got     : %v\n", spew.Sdump(result))
 	}
 }
 
