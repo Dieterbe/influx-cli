@@ -109,6 +109,7 @@ select ...                 : select statement for data retrieval
 misc
 ----
 
+conn             : display info about current connection
 raw <str>        : execute query raw (fallback for unsupported queries)
 echo <str>       : echo string + newline.
                    this is useful when the input is not visible, i.e. from scripts

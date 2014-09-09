@@ -22,6 +22,7 @@ import (
 var host, user, pass, db string
 var port int
 var cl *client.Client
+var cfg *client.ClientConfig
 var handlers []HandlerSpec
 var timing bool
 var recordsOnly bool
@@ -64,6 +65,7 @@ func (t *Timing) String() string {
 }
 
 var regexBind = "^bind"
+var regexConn = "^conn$"
 var regexCreateAdmin = "^create admin ([a-zA-Z0-9_-]+) (.+)"
 var regexCreateDb = "^create db ([a-zA-Z0-9_-]+)"
 var regexDeleteAdmin = "^delete admin ([a-zA-Z0-9_-]+)"
@@ -111,6 +113,7 @@ func init() {
 
 	handlers = []HandlerSpec{
 		HandlerSpec{regexBind, bindHandler},
+		HandlerSpec{regexConn, connHandler},
 		HandlerSpec{regexCreateAdmin, createAdminHandler},
 		HandlerSpec{regexCreateDb, createDbHandler},
 		HandlerSpec{regexDeleteAdmin, deleteAdminHandler},
@@ -183,6 +186,7 @@ select ...                 : select statement for data retrieval
 misc
 ----
 
+conn             : display info about current connection
 raw <str>        : execute query raw (fallback for unsupported queries)
 echo <str>       : echo string + newline.
                    this is useful when the input is not visible, i.e. from scripts
@@ -205,7 +209,7 @@ ANY command above can be subject to:
 }
 
 func getClient() error {
-	cfg := &client.ClientConfig{
+	cfg = &client.ClientConfig{
 		Host:     fmt.Sprintf("%s:%d", host, port),
 		Username: user,
 		Password: pass,
@@ -592,6 +596,18 @@ func bindHandler(cmd []string, out io.Writer) *Timing {
 	}
 	timings.Printed = time.Now()
 	return timings
+}
+
+func connHandler(cmd []string, out io.Writer) *Timing {
+	fmt.Fprintf(out, "Host        : %s\n", cfg.Host)
+	fmt.Fprintf(out, "User        : %s\n", cfg.Username)
+	fmt.Fprintf(out, "Pass        : %s\n", cfg.Password)
+	fmt.Fprintf(out, "Db          : %s\n", cfg.Database)
+	fmt.Fprintf(out, "secure      : %t\n", cfg.IsSecure)
+	fmt.Fprintf(out, "udp         : %t\n", cfg.IsUDP)
+	fmt.Fprintf(out, "compression : ?\n") // can't query client for this
+	fmt.Fprintf(out, "Client      : %s\n", cfg.HttpClient)
+	return nil
 }
 
 func insertHandler(cmd []string, out io.Writer) *Timing {
