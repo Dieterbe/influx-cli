@@ -52,6 +52,7 @@ Flags:
   -host="localhost": host to connect to
   -pass="root": influxdb password
   -port=8086: port to connect to
+  -recordsOnly=false: when enabled, doesn't display header
   -user="root": influxdb username
 
 Note: you can also pipe queries into stdin, one line per query

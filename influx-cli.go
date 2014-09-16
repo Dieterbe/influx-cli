@@ -103,6 +103,7 @@ func init() {
 	flag.StringVar(&user, "user", "root", "influxdb username")
 	flag.StringVar(&pass, "pass", "root", "influxdb password")
 	flag.StringVar(&db, "db", "", "database to use")
+	flag.BoolVar(&recordsOnly, "recordsOnly", false, "when enabled, doesn't display header")
 
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: influx-cli [flags] [query to execute on start]")
