@@ -48,6 +48,7 @@ running
 Usage: influx-cli [flags] [query to execute on start]
 
 Flags:
+  -async=false: when enabled, asynchronously flushes inserts
   -db="": database to use
   -host="localhost": host to connect to
   -pass="root": influxdb password
@@ -70,6 +71,7 @@ options & current session
 \t               : toggle timing, which displays timing of
                    query execution + network and output displaying
                    (default: false)
+\async           : asynchronously flush inserts
 \comp            : disable compression (client lib doesn't support enabling)
 \db <db>         : switch to databasename (requires a bind call to be effective)
 \user <username> : switch to different user (requires a bind call to be effective)

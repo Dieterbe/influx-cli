@@ -19,6 +19,12 @@ import (
 	"time"
 )
 
+// upto how many points to commit in 1 go?
+const commit_capacity = 1000
+
+// how long to wait max before flushing a commit payload
+const commit_max_wait = 500 * time.Millisecond
+
 var host, user, pass, db string
 var port int
 var cl *client.Client
@@ -26,6 +32,10 @@ var cfg *client.ClientConfig
 var handlers []HandlerSpec
 var timing bool
 var recordsOnly bool
+var async bool
+var asyncInserts chan *client.Series
+var asyncInsertsComitted chan bool
+var forceInsertsFlush chan bool
 
 var path_rc, path_hist string
 
@@ -104,6 +114,7 @@ func init() {
 	flag.StringVar(&pass, "pass", "root", "influxdb password")
 	flag.StringVar(&db, "db", "", "database to use")
 	flag.BoolVar(&recordsOnly, "recordsOnly", false, "when enabled, doesn't display header")
+	flag.BoolVar(&async, "async", false, "when enabled, asynchronously flushes inserts")
 
 	flag.Usage = func() {
 		fmt.Fprintln(os.Stderr, "Usage: influx-cli [flags] [query to execute on start]")
@@ -135,6 +146,10 @@ func init() {
 		HandlerSpec{regexUpdateAdmin, updateAdminPassHandler},
 		HandlerSpec{regexWriteRc, writeRcHandler},
 	}
+
+	asyncInserts = make(chan *client.Series)
+	asyncInsertsComitted = make(chan bool)
+	forceInsertsFlush = make(chan bool)
 }
 
 func printHelp() {
@@ -147,6 +162,7 @@ options & current session
 \t               : toggle timing, which displays timing of
                    query execution + network and output displaying
                    (default: false)
+\async           : asynchronously flush inserts
 \comp            : disable compression (client lib doesn't support enabling)
 \db <db>         : switch to databasename (requires a bind call to be effective)
 \user <username> : switch to different user (requires a bind call to be effective)
@@ -291,11 +307,22 @@ func main() {
 	if !termutil.Isatty(os.Stdin.Fd()) {
 		interactive = false
 	}
+	go committer()
 	ui(interactive, query)
 	err = readline.WriteHistoryFile(path_hist)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", path_hist, err.Error())
-		os.Exit(1)
+		Exit(1)
+	}
+	Exit(0)
+}
+func Exit(code int) {
+	close(asyncInserts)
+	select {
+	case <-time.After(time.Second * 5):
+		fmt.Fprintf(os.Stderr, "Could not flush all inserts.  Closing anyway")
+	case <-asyncInsertsComitted:
+		fmt.Println("All inserts committed")
 	}
 }
 
@@ -349,7 +376,7 @@ func handle(cmd string) {
 		writeTo, err = pipeTo.StdinPipe()
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "internal error: cannot open pipe", err.Error())
-			os.Exit(2)
+			Exit(2)
 		}
 		pipeTo.Stdout = os.Stdout
 		pipeTo.Stderr = os.Stderr
@@ -363,7 +390,7 @@ func handle(cmd string) {
 			fd, err := os.Create(file)
 			if err != nil {
 				fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
-				os.Exit(2)
+				Exit(2)
 			}
 			defer func() { fd.Close() }()
 			writeTo = fd
@@ -408,6 +435,13 @@ func handle(cmd string) {
 
 func optionHandler(cmd []string, out io.Writer) *Timing {
 	switch cmd[1] {
+	case "async":
+		if async {
+			// flush all current pending inserts so we don't get any insert errors after disabling async
+			forceInsertsFlush <- true
+		}
+		async = !async
+		fmt.Fprintln(out, "async is now", async)
 	case "r":
 		recordsOnly = !recordsOnly
 		fmt.Fprintln(out, "records-only is now", recordsOnly)
@@ -640,8 +674,13 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 		Points:  [][]interface{}{point},
 	}
 
-	err := cl.WriteSeries([]*client.Series{serie})
-
+	var err error
+	if async {
+		asyncInserts <- serie
+		err = nil
+	} else {
+		err = cl.WriteSeries([]*client.Series{serie})
+	}
 	timings.Executed = time.Now()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
@@ -649,6 +688,49 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 	}
 	timings.Printed = time.Now()
 	return timings
+}
+func committer() {
+	defer func() { asyncInsertsComitted <- true }()
+
+	commit := func(toCommit []*client.Series) {
+		if len(toCommit) == 0 {
+			return
+		}
+		err := cl.WriteSeries(toCommit)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to write %d series: %s\n", len(toCommit), err.Error())
+		}
+	}
+	timer := time.NewTimer(commit_max_wait)
+	toCommit := make([]*client.Series, 0, commit_capacity)
+
+CommitLoop:
+	for {
+		select {
+		case serie, ok := <-asyncInserts:
+			if ok {
+				toCommit = append(toCommit, serie)
+			} else {
+				// no more input, commit whatever we have and break
+				commit(toCommit)
+				break CommitLoop
+			}
+			// if capacity reached, commit
+			if len(toCommit) == commit_capacity {
+				commit(toCommit)
+				toCommit = make([]*client.Series, 0, commit_capacity)
+				timer.Reset(commit_max_wait)
+			}
+		case <-timer.C:
+			commit(toCommit)
+			toCommit = make([]*client.Series, 0, commit_capacity)
+			timer.Reset(commit_max_wait)
+		case <-forceInsertsFlush:
+			commit(toCommit)
+			toCommit = make([]*client.Series, 0, commit_capacity)
+			timer.Reset(commit_max_wait)
+		}
+	}
 }
 
 func pingHandler(cmd []string, out io.Writer) *Timing {
