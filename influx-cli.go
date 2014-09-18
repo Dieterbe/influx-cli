@@ -197,6 +197,7 @@ data i/o
 insert into <name> [(col1[,col2[...]])] values (val1[,val2[,val3[...]]])
                            : insert values into the given columns for given series name.
                              columns is optional and defaults to (time, sequence_number, value)
+                             (timestamp is assumed to be in ms. ms/u/s prefixes don't work yet)
 select ...                 : select statement for data retrieval
 
 
