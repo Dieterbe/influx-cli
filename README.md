@@ -21,6 +21,8 @@ configuration
 -------------
 
 The commandline options (see below) can also be stored in `~/.influxrc`
+Although this is entirely optional.
+
 For example:
 
 ```
