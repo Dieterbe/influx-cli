@@ -31,6 +31,8 @@ port = 8086
 user = "root"
 pass = "root"
 db = ""
+asyncCapacity = 100  # in datapoints
+asyncMaxWait = 1000  # in ms
 ```
 
 The values in use at runtime follow this order of preference:  

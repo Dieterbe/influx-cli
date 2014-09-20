@@ -20,10 +20,10 @@ import (
 )
 
 // upto how many points to commit in 1 go?
-const commit_capacity = 1000
+var AsyncCapacity = 1000
 
 // how long to wait max before flushing a commit payload
-const commit_max_wait = 500 * time.Millisecond
+var AsyncMaxWait = 500 * time.Millisecond
 
 var host, user, pass, db string
 var port int
@@ -97,11 +97,13 @@ var regexUpdateAdmin = "^update admin ([a-zA-Z0-9_-]+) (.+)"
 var regexWriteRc = "^writerc"
 
 type Config struct {
-	Host string
-	Port int
-	User string
-	Pass string
-	Db   string
+	Host          string
+	Port          int
+	User          string
+	Pass          string
+	Db            string
+	AsyncCapacity int
+	AsyncMaxWait  int
 }
 
 func init() {
@@ -287,6 +289,12 @@ func main() {
 	if conf.Db != "" {
 		db = conf.Db
 	}
+	if conf.AsyncCapacity > 0 {
+		AsyncCapacity = conf.AsyncCapacity
+	}
+	if conf.AsyncMaxWait > 0 {
+		AsyncMaxWait = time.Duration(conf.AsyncMaxWait) * time.Millisecond
+	}
 
 	flag.Parse()
 	query := strings.Join(flag.Args(), " ")
@@ -323,7 +331,7 @@ func Exit(code int) {
 	case <-time.After(time.Second * 5):
 		fmt.Fprintf(os.Stderr, "Could not flush all inserts.  Closing anyway")
 	case <-asyncInsertsComitted:
-		fmt.Println("All inserts committed")
+		fmt.Println("All (if any) async inserts committed")
 	}
 }
 
@@ -438,7 +446,8 @@ func optionHandler(cmd []string, out io.Writer) *Timing {
 	switch cmd[1] {
 	case "async":
 		if async {
-			// flush all current pending inserts so we don't get any insert errors after disabling async
+			// so we don't get any insert errors after disabling async
+			fmt.Fprintln(out, "flushing any pending async inserts", async)
 			forceInsertsFlush <- true
 		}
 		async = !async
@@ -692,8 +701,9 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 }
 func committer() {
 	defer func() { asyncInsertsComitted <- true }()
+	toCommit := make([]*client.Series, 0, AsyncCapacity)
 
-	commit := func(toCommit []*client.Series) {
+	commit := func() {
 		if len(toCommit) == 0 {
 			return
 		}
@@ -701,9 +711,10 @@ func committer() {
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write %d series: %s\n", len(toCommit), err.Error())
 		}
+		toCommit = make([]*client.Series, 0, AsyncCapacity)
 	}
-	timer := time.NewTimer(commit_max_wait)
-	toCommit := make([]*client.Series, 0, commit_capacity)
+
+	timer := time.NewTimer(AsyncMaxWait)
 
 CommitLoop:
 	for {
@@ -713,23 +724,20 @@ CommitLoop:
 				toCommit = append(toCommit, serie)
 			} else {
 				// no more input, commit whatever we have and break
-				commit(toCommit)
+				commit()
 				break CommitLoop
 			}
 			// if capacity reached, commit
-			if len(toCommit) == commit_capacity {
-				commit(toCommit)
-				toCommit = make([]*client.Series, 0, commit_capacity)
-				timer.Reset(commit_max_wait)
+			if len(toCommit) == AsyncCapacity {
+				commit()
+				timer.Reset(AsyncMaxWait)
 			}
 		case <-timer.C:
-			commit(toCommit)
-			toCommit = make([]*client.Series, 0, commit_capacity)
-			timer.Reset(commit_max_wait)
+			commit()
+			timer.Reset(AsyncMaxWait)
 		case <-forceInsertsFlush:
-			commit(toCommit)
-			toCommit = make([]*client.Series, 0, commit_capacity)
-			timer.Reset(commit_max_wait)
+			commit()
+			timer.Reset(AsyncMaxWait)
 		}
 	}
 }
