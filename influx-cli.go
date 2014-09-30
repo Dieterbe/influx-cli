@@ -50,7 +50,7 @@ var timing bool
 var recordsOnly bool
 var async bool
 var asyncInserts chan *client.Series
-var asyncInsertsComitted chan bool
+var asyncInsertsCommitted chan int
 var forceInsertsFlush chan bool
 
 var path_rc, path_hist string
@@ -168,7 +168,7 @@ func init() {
 	}
 
 	asyncInserts = make(chan *client.Series)
-	asyncInsertsComitted = make(chan bool)
+	asyncInsertsCommitted = make(chan int)
 	forceInsertsFlush = make(chan bool)
 }
 
@@ -350,8 +350,10 @@ func Exit(code int) {
 	select {
 	case <-time.After(time.Second * 5):
 		fmt.Fprintf(os.Stderr, "Could not flush all inserts.  Closing anyway")
-	case <-asyncInsertsComitted:
-		fmt.Println("All (if any) async inserts committed")
+	case num := <-asyncInsertsCommitted:
+		if num > 0 {
+			fmt.Printf("Final %d async inserts committed\n", num)
+		}
 	}
 }
 
@@ -720,18 +722,19 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 	return timings
 }
 func committer() {
-	defer func() { asyncInsertsComitted <- true }()
 	toCommit := make([]*client.Series, 0, AsyncCapacity)
 
-	commit := func() {
-		if len(toCommit) == 0 {
-			return
+	commit := func() int {
+		size := len(toCommit)
+		if size == 0 {
+			return 0
 		}
 		err := cl.WriteSeries(toCommit)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write %d series: %s\n", len(toCommit), err.Error())
 		}
 		toCommit = make([]*client.Series, 0, AsyncCapacity)
+		return size
 	}
 
 	timer := time.NewTimer(AsyncMaxWait)
@@ -744,7 +747,7 @@ CommitLoop:
 				toCommit = append(toCommit, serie)
 			} else {
 				// no more input, commit whatever we have and break
-				commit()
+				asyncInsertsCommitted <- commit()
 				break CommitLoop
 			}
 			// if capacity reached, commit
