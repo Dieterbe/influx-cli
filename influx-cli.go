@@ -362,6 +362,7 @@ func Exit(code int) {
 			fmt.Printf("Final %d async inserts committed\n", num)
 		}
 	}
+	os.Exit(code)
 }
 
 func ui(interactive bool, query string) {
