@@ -19,6 +19,22 @@ import (
 	"time"
 )
 
+// the following client methods are not implemented yet.
+// CreateDatabaseUser
+// ChangeDatabaseUser
+// UpdateDatabaseUser
+// UpdateDatabaseUserPermissions
+// DeleteDatabaseUser
+// GetDatabaseUserList
+// AlterDatabasePrivilege
+// AuthenticateClusterAdmin
+// GetShards // this returns LongTermShortTermShards which i think is not useful for >0.8
+
+// DropShardSpace
+// CreateShardSpace
+// DropShard
+// UpdateShardSpace
+
 // upto how many points to commit in 1 go?
 var AsyncCapacity = 1000
 
@@ -89,6 +105,7 @@ var regexListAdmin = "^list admin"
 var regexListDb = "^list db"
 var regexListSeries = "^list series.*"
 var regexListServers = "^list servers$"
+var regexListShardspaces = "^list shardspaces$"
 var regexOption = "^\\\\([a-z]+) ?([a-zA-Z0-9_-]+)?"
 var regexPing = "^ping$"
 var regexRaw = "^raw (.+)"
@@ -141,6 +158,7 @@ func init() {
 		HandlerSpec{regexListDb, listDbHandler},
 		HandlerSpec{regexListSeries, listSeriesHandler},
 		HandlerSpec{regexListServers, listServersHandler},
+		HandlerSpec{regexListShardspaces, listShardspacesHandler},
 		HandlerSpec{regexOption, optionHandler},
 		HandlerSpec{regexPing, pingHandler},
 		HandlerSpec{regexRaw, rawHandler},
@@ -191,6 +209,8 @@ drop series <name>              : drop series by given name
 
 delete server <id>              : delete server by id
 list servers                    : list servers
+
+list shardspaces                : list shardspaces
 
 
 data i/o
@@ -786,6 +806,47 @@ func listSeriesHandler(cmd []string, out io.Writer) *Timing {
 		for _, p := range series.Points {
 			fmt.Fprintln(out, p[1])
 		}
+	}
+	timings.Printed = time.Now()
+	return timings
+}
+
+func listShardspacesHandler(cmd []string, out io.Writer) *Timing {
+	timings := makeTiming()
+	shardSpaces, err := cl.GetShardSpaces()
+	timings.Executed = time.Now()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, err.Error()+"\n")
+		return timings
+	}
+	dbLenMax := len("Database")
+	nameLenMax := len("Name")
+	regexLenMax := len("Regex")
+	retentionLenMax := len("Retention")
+	durationLenMax := len("Duration")
+
+	for _, s := range shardSpaces {
+		if len(s.Database) > dbLenMax {
+			dbLenMax = len(s.Database)
+		}
+		if len(s.Name) > nameLenMax {
+			nameLenMax = len(s.Name)
+		}
+		if len(s.Regex) > regexLenMax {
+			regexLenMax = len(s.Regex)
+		}
+		if len(s.RetentionPolicy) > retentionLenMax {
+			retentionLenMax = len(s.RetentionPolicy)
+		}
+		if len(s.ShardDuration) > durationLenMax {
+			durationLenMax = len(s.ShardDuration)
+		}
+	}
+	headerFmt := fmt.Sprintf("%%%ds %%%ds %%%ds %%%ds %%%ds %%2s %%5s\n", dbLenMax, nameLenMax, regexLenMax, retentionLenMax, durationLenMax)
+	rowFmt := fmt.Sprintf("%%%ds %%%ds %%%ds %%%ds %%%ds %%2d %%5d\n", dbLenMax, nameLenMax, regexLenMax, retentionLenMax, durationLenMax)
+	fmt.Fprintf(out, headerFmt, "Database", "Name", "Regex", "Retention", "Duration", "RF", "Split")
+	for _, s := range shardSpaces {
+		fmt.Fprintf(out, rowFmt, s.Database, s.Name, s.Regex, s.RetentionPolicy, s.ShardDuration, s.ReplicationFactor, s.Split)
 	}
 	timings.Printed = time.Now()
 	return timings

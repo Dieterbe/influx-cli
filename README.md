@@ -103,6 +103,8 @@ list series [/regex/[i]]        : list series, optionally filtered by regex
 delete server <id>              : delete server by id
 list servers                    : list servers
 
+list shardspaces                : list shardspaces
+
 
 data i/o
 --------
