@@ -5,7 +5,9 @@ import (
 	"github.com/andrew-d/go-termutil"
 	"github.com/davecgh/go-spew/spew"
 	"github.com/influxdb/influxdb/client"
+	"github.com/rcrowley/go-metrics"
 	"github.com/shavac/readline"
+	//	"log"
 
 	"flag"
 	"fmt"
@@ -52,6 +54,7 @@ var async bool
 var asyncInserts chan *client.Series
 var asyncInsertsCommitted chan int
 var forceInsertsFlush chan bool
+var sync_inserts_timer metrics.Timer
 
 var path_rc, path_hist string
 
@@ -170,6 +173,9 @@ func init() {
 	asyncInserts = make(chan *client.Series)
 	asyncInsertsCommitted = make(chan int)
 	forceInsertsFlush = make(chan bool)
+
+	sync_inserts_timer = metrics.NewTimer()
+	metrics.Register("insert_sync", sync_inserts_timer)
 }
 
 func printHelp() {
@@ -336,6 +342,7 @@ func main() {
 	if !termutil.Isatty(os.Stdin.Fd()) {
 		interactive = false
 	}
+	//go metrics.Log(metrics.DefaultRegistry, 10e9, log.New(os.Stderr, "metrics: ", log.Lmicroseconds))
 	go committer()
 	ui(interactive, query)
 	err = readline.WriteHistoryFile(path_hist)
@@ -711,7 +718,9 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 		asyncInserts <- serie
 		err = nil
 	} else {
+		ts := time.Now()
 		err = cl.WriteSeries([]*client.Series{serie})
+		sync_inserts_timer.Update(time.Since(ts))
 	}
 	timings.Executed = time.Now()
 	if err != nil {
@@ -729,6 +738,8 @@ func committer() {
 		if size == 0 {
 			return 0
 		}
+		t := metrics.GetOrRegisterTimer("inserts_async_"+strconv.FormatInt(int64(len(toCommit)), 10), metrics.DefaultRegistry)
+		defer func(start time.Time) { t.Update(time.Since(start)) }(time.Now())
 		err := cl.WriteSeries(toCommit)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to write %d series: %s\n", len(toCommit), err.Error())
