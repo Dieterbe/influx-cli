@@ -371,10 +371,11 @@ func ui(interactive bool, query string) {
 		prompt = "influx> "
 	}
 	if query != "" {
-		// execute query first
+		// execute query passed from cmd arg and stop
 		// don't add to history cause it's not really an interactive query
 		cmd := strings.TrimSuffix(strings.TrimSpace(query), ";")
 		handle(cmd)
+		return
 	}
 
 L:
