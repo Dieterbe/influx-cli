@@ -9,6 +9,7 @@ import (
 	"github.com/shavac/readline"
 	//	"log"
 
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
@@ -325,30 +326,35 @@ func main() {
 	flag.Parse()
 	query := strings.Join(flag.Args(), " ")
 
-	err := readline.ReadHistoryFile(path_hist)
-	if err != nil {
-		if err.Error() != "no such file or directory" {
-			fmt.Fprintf(os.Stderr, "Cannot read '%s': %s\n", path_hist, err.Error())
-			os.Exit(1)
-		}
-	}
-
-	err = getClient()
+	err := getClient()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, err.Error()+"\n")
 		os.Exit(1)
 	}
-	interactive := true
-	if !termutil.Isatty(os.Stdin.Fd()) {
-		interactive = false
-	}
+
 	//go metrics.Log(metrics.DefaultRegistry, 10e9, log.New(os.Stderr, "metrics: ", log.Lmicroseconds))
 	go committer()
-	ui(interactive, query)
-	err = readline.WriteHistoryFile(path_hist)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", path_hist, err.Error())
-		Exit(1)
+
+	if query != "" {
+		// execute query passed from cmd arg and stop
+		cmd := strings.TrimSuffix(strings.TrimSpace(query), ";")
+		handle(cmd)
+	} else if !termutil.Isatty(os.Stdin.Fd()) {
+		// execute all input from stdin and stop
+		readStdin()
+	} else {
+		// if stdin is a tty, provide readline prompt with history.
+		err = readline.ReadHistoryFile(path_hist)
+		if err != nil && err.Error() != "no such file or directory" {
+			fmt.Fprintf(os.Stderr, "Cannot read '%s': %s\n", path_hist, err.Error())
+			os.Exit(1)
+		}
+		ui()
+		err = readline.WriteHistoryFile(path_hist)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Cannot write to '%s': %s\n", path_hist, err.Error())
+			Exit(1)
+		}
 	}
 	Exit(0)
 }
@@ -365,19 +371,24 @@ func Exit(code int) {
 	os.Exit(code)
 }
 
-func ui(interactive bool, query string) {
-	prompt := ""
-	if interactive {
-		prompt = "influx> "
-	}
-	if query != "" {
-		// execute query passed from cmd arg and stop
-		// don't add to history cause it's not really an interactive query
-		cmd := strings.TrimSuffix(strings.TrimSpace(query), ";")
+func readStdin() {
+	reader := bufio.NewReader(os.Stdin)
+	for {
+		line, err := reader.ReadString('\n')
+		if err == io.EOF {
+			return
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err.Error())
+			Exit(2)
+		}
+		cmd := strings.TrimSuffix(strings.TrimSpace(line), ";")
 		handle(cmd)
-		return
 	}
+}
 
+func ui() {
+	prompt := "influx> "
 L:
 	for {
 		switch result := readline.ReadLine(&prompt); true {
