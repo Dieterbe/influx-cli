@@ -393,6 +393,7 @@ L:
 	for {
 		switch result := readline.ReadLine(&prompt); true {
 		case result == nil:
+			fmt.Println("")
 			break L
 		case *result == "exit":
 			readline.AddHistory(*result)
