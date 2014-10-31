@@ -423,6 +423,11 @@ func handle(cmd string) {
 		cmdArr := strings.Split(cmd, "|")
 		cmd = cmdArr[0]
 		cmdAndArgs := strings.Fields(cmdArr[1])
+		if len(cmdAndArgs) < 2 {
+			fmt.Fprintln(os.Stderr, "error: no command specified to pipe to")
+			Exit(2)
+		}
+
 		pipeTo = exec.Command(cmdAndArgs[0], cmdAndArgs[1:]...)
 		var err error
 		writeTo, err = pipeTo.StdinPipe()
