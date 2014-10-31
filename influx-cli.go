@@ -8,8 +8,8 @@ import (
 	"github.com/rcrowley/go-metrics"
 	"github.com/shavac/readline"
 	//	"log"
-
 	"bufio"
+	"encoding/csv"
 	"flag"
 	"fmt"
 	"io"
@@ -103,8 +103,8 @@ var regexDeleteDb = "^delete db ([a-zA-Z0-9_-]+)"
 var regexDeleteServer = "^delete server (.+)"
 var regexDropSeries = "^drop series .+"
 var regexEcho = "^echo (.+)"
-var regexInsert = "^insert into ([a-zA-Z0-9_-]+) ?(\\(.+\\))? values \\((.*)\\)"
-var regexInsertQuoted = "^insert into \"(.+)\" ?(\\(.+\\))? values \\((.*)\\)"
+var regexInsert = "^insert into ([a-zA-Z0-9_-]+) ?(\\(.+\\))? values \\((.*)\\)$"
+var regexInsertQuoted = "^insert into \"(.+)\" ?(\\(.+\\))? values \\((.*)\\)$"
 var regexListAdmin = "^list admin"
 var regexListDb = "^list db"
 var regexListSeries = "^list series.*"
@@ -705,12 +705,23 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 	var cols []string
 	if cols_str != "" {
 		cols_str = cols_str[1 : len(cols_str)-1] // strip surrounding ()
-		cols = strings.Split(cols_str, ",")
+		tmp_cols := strings.Split(cols_str, ",")
+		cols = make([]string, len(tmp_cols))
+		for i, name := range tmp_cols {
+			cols[i] = strings.TrimSpace(name)
+		}
 	} else {
 		cols = []string{"time", "sequence_number", "value"}
 	}
 	vals_str := cmd[3]
-	values := strings.Split(vals_str, ",")
+	// vals_str could be: foo,bar,"avg(something,123)",quux
+	reader := csv.NewReader(strings.NewReader(vals_str))
+	values, err := reader.Read()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Could not parse values"+err.Error()+"\n")
+		return timings
+	}
+
 	if len(values) != len(cols) {
 		fmt.Fprintf(os.Stderr, "Number of values (%d) must match number of colums (%d): Columns are: %v\n", len(values), len(cols), cols)
 		return timings
@@ -727,7 +738,6 @@ func insertHandler(cmd []string, out io.Writer) *Timing {
 		Points:  [][]interface{}{point},
 	}
 
-	var err error
 	if async {
 		asyncInserts <- serie
 		err = nil
