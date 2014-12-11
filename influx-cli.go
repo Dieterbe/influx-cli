@@ -50,6 +50,7 @@ var cl *client.Client
 var cfg *client.ClientConfig
 var handlers []HandlerSpec
 var timing bool
+var dateTime bool
 var recordsOnly bool
 var async bool
 var asyncInserts chan *client.Series
@@ -185,6 +186,7 @@ func printHelp() {
 options & current session
 -------------------------
 
+\dt              : print timestamps as datetime strings
 \r               : show records only, no headers
 \t               : toggle timing, which displays timing of
                    query execution + network and output displaying
@@ -500,6 +502,9 @@ func optionHandler(cmd []string, out io.Writer) *Timing {
 		}
 		async = !async
 		fmt.Fprintln(out, "async is now", async)
+	case "dt":
+		dateTime = !dateTime
+		fmt.Fprintln(out, "datetime printing is now", dateTime)
 	case "r":
 		recordsOnly = !recordsOnly
 		fmt.Fprintln(out, "records-only is now", recordsOnly)
@@ -912,6 +917,9 @@ func selectHandler(cmd []string, out io.Writer) *Timing {
 		"sequence_number": {"%16s", "      %10f"},
 		"value":           {"%20s", "%20f"},
 	}
+	if dateTime {
+		specs["time"] = Spec{"%33s", "%33s"}
+	}
 	defaultSpec := Spec{"%20s", "%20v"}
 	var spec Spec
 	var ok bool
@@ -937,7 +945,15 @@ func selectHandler(cmd []string, out io.Writer) *Timing {
 		}
 		for _, p := range serie.Points {
 			for i, fmtStr := range colrows {
-				fmt.Fprintf(out, fmtStr, p[i])
+				if i == 0 && dateTime {
+					msFloat := p[i].(float64)
+					ns := (int64(msFloat) % 1000) * 1000000
+					s := int64(msFloat / 1000)
+					d := time.Unix(s, ns)
+					fmt.Fprintf(out, fmtStr, d)
+				} else {
+					fmt.Fprintf(out, fmtStr, p[i])
+				}
 			}
 			fmt.Fprintln(out)
 		}
