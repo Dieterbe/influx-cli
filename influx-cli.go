@@ -6,7 +6,7 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/influxdb/influxdb/client"
 	"github.com/rcrowley/go-metrics"
-	"github.com/shavac/readline"
+	"github.com/gobs/readline"
 	//	"log"
 	"bufio"
 	"encoding/csv"
