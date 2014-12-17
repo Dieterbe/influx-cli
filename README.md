@@ -131,10 +131,10 @@ exit / ctrl-D    : exit the program
 modifiers
 ---------
 
-ANY command above can be subject to:
+ANY command above can be subject to piping to another command or writing output to a file, like so:
 
-| <command>     : pipe the output into an external command (example: list series | sort)
-                  note: currently you can only pipe into one external command at a time
-> <filename>    : redirect the output into a file
+command; | <command>     : pipe the output into an external command (example: list series; | sort)
+                           note: currently you can only pipe into one external command at a time
+command; > <filename>    : redirect the output into a file
 
 ```

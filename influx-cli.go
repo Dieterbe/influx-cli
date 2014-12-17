@@ -4,9 +4,9 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/andrew-d/go-termutil"
 	"github.com/davecgh/go-spew/spew"
+	"github.com/gobs/readline"
 	"github.com/influxdb/influxdb/client"
 	"github.com/rcrowley/go-metrics"
-	"github.com/gobs/readline"
 	//	"log"
 	"bufio"
 	"encoding/csv"
@@ -247,11 +247,11 @@ exit / ctrl-D    : exit the program
 modifiers
 ---------
 
-ANY command above can be subject to:
+ANY command above can be subject to piping to another command or writing output to a file, like so:
 
-| <command>     : pipe the output into an external command (example: list series | sort)
-                  note: only one external command is currently supported
-> <filename>    : redirect the output into a file
+command; | <command>     : pipe the output into an external command (example: list series; | sort)
+                           note: currently you can only pipe into one external command at a time
+command; > <filename>    : redirect the output into a file
 
 `
 	fmt.Println(out)
@@ -384,7 +384,7 @@ func readStdin() {
 			fmt.Fprintln(os.Stderr, err.Error())
 			Exit(2)
 		}
-		cmd := strings.TrimSuffix(strings.TrimSpace(line), ";")
+		cmd := strings.TrimSpace(line)
 		handle(cmd)
 	}
 }
@@ -408,7 +408,7 @@ L:
 			printHelp()
 		case *result != "": //ignore blank lines
 			readline.AddHistory(*result)
-			cmd := strings.TrimSuffix(strings.TrimSpace(*result), ";")
+			cmd := strings.TrimSpace(*result)
 			handle(cmd)
 		}
 	}
@@ -420,12 +420,15 @@ func handle(cmd string) {
 	var pipeTo *exec.Cmd
 	writeTo = os.Stdout
 	mode := 0 // 1 -> pipe to cmd, 2 -> write to file
-	if strings.Contains(cmd, "|") {
+	cmd = strings.Replace(cmd, "; |", ";|", 1)
+	cmd = strings.Replace(cmd, "; >", ";>", 1)
+
+	if strings.Contains(cmd, ";|") {
 		mode = 1
-		cmdArr := strings.Split(cmd, "|")
-		cmd = cmdArr[0]
-		cmdAndArgs := strings.Fields(cmdArr[1])
-		if len(cmdAndArgs) < 2 {
+		cmdArr := strings.Split(cmd, ";|")
+		cmd = strings.TrimSpace(cmdArr[0])
+		cmdAndArgs := strings.Fields(strings.TrimSpace(cmdArr[1]))
+		if len(cmdAndArgs) == 0 {
 			fmt.Fprintln(os.Stderr, "error: no command specified to pipe to")
 			Exit(2)
 		}
@@ -439,22 +442,21 @@ func handle(cmd string) {
 		}
 		pipeTo.Stdout = os.Stdout
 		pipeTo.Stderr = os.Stderr
-	} else {
-		cmd = strings.Replace(cmd, "where time >", "INFLUX_CLI_WHERE_TIME", -1)
-		if strings.Contains(cmd, ">") {
-			mode = 2
-			cmdArr := strings.Split(cmd, ">")
-			cmd = cmdArr[0]
-			file := strings.TrimSpace(cmdArr[1])
-			fd, err := os.Create(file)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
-				Exit(2)
-			}
-			defer func() { fd.Close() }()
-			writeTo = fd
+	} else if strings.Contains(cmd, ";>") {
+		mode = 2
+		cmdArr := strings.Split(cmd, ";>")
+		cmd = cmdArr[0]
+		file := strings.TrimSpace(cmdArr[1])
+		fd, err := os.Create(file)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "internal error: cannot open file", file, "for writing", err.Error())
+			Exit(2)
 		}
-		cmd = strings.Replace(cmd, "INFLUX_CLI_WHERE_TIME", "where time >", -1)
+		defer func() { fd.Close() }()
+		writeTo = fd
+	} else {
+		// it may or may not have this ending delimiter
+		cmd = strings.TrimSuffix(cmd, ";")
 	}
 
 	for _, spec := range handlers {
