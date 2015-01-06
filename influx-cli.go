@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"net/url"
 )
 
 // the following client methods are not implemented yet.
@@ -313,7 +314,7 @@ func main() {
 		user = conf.User
 	}
 	if conf.Pass != "" {
-		pass = conf.Pass
+		pass = url.QueryEscape(conf.Pass)
 	}
 	if conf.Db != "" {
 		db = conf.Db
