@@ -8,6 +8,7 @@ features
 * makes influxdb features available through the query language, even when influxdb itself only supports them as API calls.
 * readline (history searching and navigation. uses ~/.influx_history)
 * ability to read commands from stdin, pipe command/query out to external process or redirect to a file
+* apache2 licensed, see included license file
 
 
 installation
